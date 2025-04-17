@@ -35,7 +35,7 @@ if symbol:
 
     # ── Indicator Calculations ───────────────────────────────────────────────
     close = data["Close"].astype(float)
-    # RSI
+    # Ensure 'close' is a 1D series for RSIIndicator
     rsi = RSIIndicator(close).rsi().dropna()
     data["RSI"] = rsi
     # ATR
