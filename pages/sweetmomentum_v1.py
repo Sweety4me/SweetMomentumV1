@@ -21,7 +21,8 @@ if symbol:
             st.success(f"📈 Showing data for `{symbol}`")
 
             try:
-                rsi = ta.momentum.RSIIndicator(data["Close"])
+                close_series = data["Close"].squeeze()  # 🪛 Fix: convert to 1D
+                rsi = ta.momentum.RSIIndicator(close_series)
                 data["momentum"] = rsi.rsi()
                 data.dropna(inplace=True)
 
@@ -42,7 +43,7 @@ if symbol:
                     st.write("📊 Neutral zone. Wait for confirmation.")
 
             except Exception as calc_err:
-                st.error(f"RSI calculation error: {calc_err}")
+                st.error(f"🥺 RSI calculation error: {calc_err}")
 
         else:
             st.error("❌ No data found or 'Close' column missing.")
