@@ -8,7 +8,7 @@ st.title("🚀 SweetMomentum V1 – Breakout Screener")
 
 symbol = st.text_input("📌 Enter Stock Symbol (e.g. RELIANCE or RELIANCE.NS)", value="RELIANCE.NS").upper()
 
-# Ensure symbol has ".NS" for NSE stocks
+# Forcefully fix to NSE
 if symbol and not symbol.endswith(".NS"):
     symbol += ".NS"
 
@@ -20,18 +20,20 @@ if symbol:
             st.success(f"📈 Showing data for {symbol}")
 
             try:
-                # Make sure it's 1D Series
-                close_series = data["Close"]
-                rsi = RSIIndicator(close_series)
+                # 💥 THE FIX: Ensure it's a 1D Series
+                close_series = data["Close"].astype(float).copy()
+                if len(close_series.shape) > 1:
+                    close_series = close_series.squeeze()  # Flatten if needed
+
+                rsi = RSIIndicator(close=close_series)
                 data["momentum"] = rsi.rsi()
                 data.dropna(inplace=True)
 
-                # Plot RSI and Close
+                # Plotting
                 st.line_chart(data[["Close"]])
                 st.line_chart(data[["momentum"]])
 
                 latest = data.iloc[-1]
-
                 st.info(f"""
                 🔎 **Latest Close**: ₹{latest['Close']:.2f}  
                 ⚡ **Momentum RSI**: {latest['momentum']:.2f}
