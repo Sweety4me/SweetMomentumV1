@@ -6,30 +6,37 @@ from ta.momentum import RSIIndicator
 st.set_page_config(page_title="SweetMomentum V1", layout="centered")
 st.title("🚀 SweetMomentum V1 – Breakout Screener")
 
-symbol = st.text_input("📌 Enter Stock Symbol (e.g. RELIANCE or RELIANCE.NS)", value="RELIANCE.NS").upper()
+symbol = st.text_input(
+    "📌 Enter Stock Symbol (e.g. RELIANCE or RELIANCE.NS)",
+    value="RELIANCE.NS"
+).upper()
 
-# Forcefully fix to NSE
+# Ensure NSE suffix
 if symbol and not symbol.endswith(".NS"):
     symbol += ".NS"
 
 if symbol:
     try:
-        data = yf.download(symbol, period="6mo", interval="1d")
+        # 1️⃣ Fetch
+        data = yf.download(symbol, period="6mo", interval="1d", progress=False)
 
+        # 2️⃣ Flatten columns if needed
+        if isinstance(data.columns, pd.MultiIndex):
+            # Keep only the second level (e.g. 'Close'), drop the ticker level
+            data.columns = data.columns.get_level_values(0)
+
+        # 3️⃣ Validate data
         if not data.empty and "Close" in data.columns:
             st.success(f"📈 Showing data for {symbol}")
 
             try:
-                # 💥 THE FIX: Ensure it's a 1D Series
-                close_series = data["Close"].astype(float).copy()
-                if len(close_series.shape) > 1:
-                    close_series = close_series.squeeze()  # Flatten if needed
-
-                rsi = RSIIndicator(close=close_series)
-                data["momentum"] = rsi.rsi()
+                # 4️⃣ Calculate RSI (1D Series)
+                close_series = data["Close"].astype(float)
+                rsi = RSIIndicator(close=close_series).rsi()
+                data["momentum"] = rsi
                 data.dropna(inplace=True)
 
-                # Plotting
+                # 5️⃣ Plot separately to avoid column-index issues
                 st.line_chart(data[["Close"]])
                 st.line_chart(data[["momentum"]])
 
