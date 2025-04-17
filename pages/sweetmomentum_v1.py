@@ -1,15 +1,14 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
-import ta
+from ta.momentum import RSIIndicator
 
 st.set_page_config(page_title="SweetMomentum V1", layout="centered")
-
 st.title("🚀 SweetMomentum V1 – Breakout Screener")
 
-symbol = st.text_input("📌 Enter Stock Symbol (e.g. RELIANCE or RELIANCE.NS)", value="RELIANCE.NS")
+symbol = st.text_input("📌 Enter Stock Symbol (e.g. RELIANCE or RELIANCE.NS)", value="RELIANCE.NS").upper()
 
-# Ensure correct format
+# Ensure symbol has ".NS" for NSE stocks
 if symbol and not symbol.endswith(".NS"):
     symbol += ".NS"
 
@@ -18,15 +17,18 @@ if symbol:
         data = yf.download(symbol, period="6mo", interval="1d")
 
         if not data.empty and "Close" in data.columns:
-            st.success(f"📈 Showing data for `{symbol}`")
+            st.success(f"📈 Showing data for {symbol}")
 
             try:
-                close_series = data["Close"].squeeze()  # 🪛 Fix: convert to 1D
-                rsi = ta.momentum.RSIIndicator(close_series)
+                # Make sure it's 1D Series
+                close_series = data["Close"]
+                rsi = RSIIndicator(close_series)
                 data["momentum"] = rsi.rsi()
                 data.dropna(inplace=True)
 
-                st.line_chart(data[["Close", "momentum"]])
+                # Plot RSI and Close
+                st.line_chart(data[["Close"]])
+                st.line_chart(data[["momentum"]])
 
                 latest = data.iloc[-1]
 
