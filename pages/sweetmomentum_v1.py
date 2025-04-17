@@ -1,113 +1,112 @@
 import streamlit as st
 import yfinance as yf
 import pandas as pd
+from ta.momentum import RSIIndicator
+from ta.volatility import AverageTrueRange
+import matplotlib.pyplot as plt
+import plotly.graph_objs as go
 
-# ── Indicator Helpers ─────────────────────────────────────────────────────────
-def compute_rsi(series: pd.Series, period: int = 14) -> pd.Series:
-    delta = series.diff()
-    gain  = delta.clip(lower=0)
-    loss  = -delta.clip(upper=0)
-    avg_gain = gain.rolling(window=period, min_periods=period).mean()
-    avg_loss = loss.rolling(window=period, min_periods=period).mean()
-    rs = avg_gain / avg_loss
-    rsi = 100 - (100 / (1 + rs))
-    return rsi
+st.set_page_config(page_title="SweetMomentum V2", layout="centered")
+st.title("SweetMomentum V2 – Breakout Screener")
 
-def compute_atr(df: pd.DataFrame, period: int = 14) -> pd.Series:
-    high = df["High"]
-    low  = df["Low"]
-    prev_close = df["Close"].shift(1)
-    tr1 = high - low
-    tr2 = (high - prev_close).abs()
-    tr3 = (low - prev_close).abs()
-    tr = pd.concat([tr1, tr2, tr3], axis=1).max(axis=1)
-    atr = tr.rolling(window=period, min_periods=period).mean()
-    return atr
+symbol = st.text_input("\ud83d\udccc Enter Stock Symbol (e.g. RELIANCE or RELIANCE.NS)", "RELIANCE.NS")
+symbol = symbol.upper().strip()
 
-# ── Streamlit Page Setup ──────────────────────────────────────────────────────
-st.set_page_config(page_title="SweetMomentum V1", layout="centered")
-st.title("🚀 SweetMomentum V1 – Breakout Screener")
-
-# ── User Input ────────────────────────────────────────────────────────────────
-symbol_input = st.text_input(
-    "📌 Enter Stock Symbol (e.g. RELIANCE or RELIANCE.NS)",
-    value="RELIANCE.NS",
-).strip().upper()
-symbol = symbol_input if symbol_input.endswith(".NS") else symbol_input + ".NS"
-
-# ── Fetch Data ────────────────────────────────────────────────────────────────
 if symbol:
-    with st.spinner(f"🔄 Fetching 5Y data for {symbol}..."):
-        try:
-            data = yf.download(symbol, period="5y", interval="1d", progress=False)
-        except Exception as e:
-            st.error(f"📡 Data fetch failed: {e}")
-            st.stop()
+    try:
+        df = yf.download(symbol, period="6mo", interval="1d")
+        if df.empty:
+            st.warning("No data found. Please check the stock symbol.")
+        else:
+            st.markdown(f"### \ud83d\udcc8 Data loaded for `{symbol}`")
 
-    if data.empty or "Close" not in data.columns:
-        st.error("❌ No data found. Check the symbol and try again.")
-        st.stop()
+            df.dropna(inplace=True)
+            df['RSI'] = RSIIndicator(df['Close']).rsi()
+            df['ATR'] = AverageTrueRange(df['High'], df['Low'], df['Close']).average_true_range()
+            latest_close = df['Close'].iloc[-1]
+            latest_rsi = round(df['RSI'].iloc[-1], 2)
+            latest_atr = round(df['ATR'].iloc[-1], 2)
 
-    st.success(f"📈 Data loaded for {symbol}")
+            # Signal logic
+            if latest_rsi < 30:
+                signal = "🔓 BUY"
+                strategy_type = "Swing"
+            elif latest_rsi > 70:
+                signal = "❌ SELL"
+                strategy_type = "Swing"
+            else:
+                signal = "⚖️ HOLD"
+                strategy_type = "Neutral"
 
-    # ── Clean MultiIndex Columns ──────────────────────────────────────────────
-    if isinstance(data.columns, pd.MultiIndex):
-        data.columns = data.columns.get_level_values(0)
+            # Backtesting logic (simple RSI-based swing strategy)
+            def swing_backtest(data, rsi_buy=30, rsi_sell=70, target_pct=0.05, stoploss_pct=0.025):
+                data = data.copy()
+                data['RSI'] = RSIIndicator(data['Close']).rsi()
+                data.dropna(inplace=True)
 
-    # ── Calculate Indicators ───────────────────────────────────────────────────
-    data["RSI"]  = compute_rsi(data["Close"], 14)
-    data["ATR14"]= compute_atr(data, 14)
-    data.dropna(inplace=True)
+                trades = []
+                in_trade = False
+                entry_price = 0
+                entry_date = ""
 
-    latest = data.iloc[-1]
-    price      = latest["Close"]
-    latest_rsi = latest["RSI"]
-    latest_atr = latest["ATR14"]
+                for i in range(1, len(data)):
+                    row = data.iloc[i]
+                    prev_row = data.iloc[i - 1]
 
-    # ── Trade Signal Logic ─────────────────────────────────────────────────────
-    if latest_rsi < 30:
-        signal = "📈 BUY"
-        entry  = price
-        sl     = round(entry - latest_atr, 2)
-        target = round(entry + latest_atr * 2, 2)
-    elif latest_rsi > 70:
-        signal = "📉 SELL"
-        entry  = price
-        sl     = round(entry + latest_atr, 2)
-        target = round(entry - latest_atr * 2, 2)
-    else:
-        signal = "⚖️ HOLD"
-        entry = sl = target = None
+                    if not in_trade:
+                        if prev_row['RSI'] < rsi_buy:
+                            entry_price = row['Open']
+                            entry_date = row.name
+                            in_trade = True
+                    else:
+                        high = row['High']
+                        low = row['Low']
+                        target_price = entry_price * (1 + target_pct)
+                        stoploss_price = entry_price * (1 - stoploss_pct)
 
-    # ── Backtest Logic ─────────────────────────────────────────────────────────
-    def backtest_momentum(df, low=30, high=70):
-        wins = 0; total = 0
-        for i in range(len(df) - 1):
-            if df["RSI"].iat[i] < low:
-                entry_p = df["Close"].iat[i + 1]
-                # exit when RSI crosses above high
-                for j in range(i + 2, min(i + 12, len(df))):
-                    if df["RSI"].iat[j] > high:
-                        if df["Close"].iat[j] > entry_p: wins += 1
-                        total += 1
-                        break
-        return round((wins / total) * 100, 2) if total else 0.0
+                        if high >= target_price:
+                            trades.append({'entry': entry_date, 'exit': row.name, 'result': 'win'})
+                            in_trade = False
+                        elif low <= stoploss_price:
+                            trades.append({'entry': entry_date, 'exit': row.name, 'result': 'loss'})
+                            in_trade = False
 
-    win_rate = backtest_momentum(data)
+                df_trades = pd.DataFrame(trades)
+                win_rate = 0
+                if not df_trades.empty:
+                    win_rate = round(100 * len(df_trades[df_trades['result'] == 'win']) / len(df_trades), 2)
+                return win_rate
 
-    # ── Display Results ─────────────────────────────────────────────────────────
-    st.subheader("💹 Latest Trade Details")
-    st.write(f"• **Signal:** {signal}")
-    if entry is not None:
-        st.write(f"• **Entry:** ₹{entry:.2f}")
-        st.write(f"• **Stop‑Loss:** ₹{sl:.2f}")
-        st.write(f"• **Target:** ₹{target:.2f}")
-    st.write(f"• **RSI (14):** {latest_rsi:.2f}")
-    st.write(f"• **ATR (14):** {latest_atr:.2f}")
+            win_rate = swing_backtest(df)
 
-    st.subheader("📊 5Y Backtest Win Rate")
-    st.metric("Win Rate", f"{win_rate}%")
+            # Display output
+            st.markdown(f"""
+                ### 📉 Latest Trade Details
+                • Signal: {signal}
 
-    # ── Optional Charts ────────────────────────────────────────────────────────
-    with st.expander("Show Price, RSI & ATR Charts"):
-        st.line_chart(data[["Close", "RSI", "ATR14"]])
+                • RSI (14): {latest_rsi}
+
+                • ATR (14): {latest_atr}
+
+                • Strategy Type: **{strategy_type}**
+
+                ### 📊 5M Backtest Win Rate
+                **Win Rate**: `{win_rate}%`
+            """)
+
+            # Optional chart toggle
+            if st.checkbox("Show Price, RSI & ATR Charts"):
+                st.subheader("Price Chart")
+                fig_price = go.Figure(data=[go.Candlestick(x=df.index,
+                                open=df['Open'], high=df['High'],
+                                low=df['Low'], close=df['Close'])])
+                st.plotly_chart(fig_price, use_container_width=True)
+
+                st.subheader("RSI Chart")
+                st.line_chart(df['RSI'])
+
+                st.subheader("ATR Chart")
+                st.line_chart(df['ATR'])
+
+    except Exception as e:
+        st.error(f"\ud83d\ude97 Error: {e}")
