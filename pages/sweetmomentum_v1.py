@@ -12,65 +12,70 @@ symbol = st.text_input(
     "📌 Enter Stock Symbol (e.g. RELIANCE or RELIANCE.NS)",
     value="RELIANCE.NS"
 ).upper()
+
 if not symbol.endswith(".NS"):
     symbol += ".NS"
 
-if symbol:
-    try:
-        data = yf.download(symbol, period="6mo", interval="1d", progress=False)
-        if data.empty:
-            st.error("No data found for this symbol.")
-            st.stop()
+try:
+    data = yf.download(symbol, period="6mo", interval="1d", progress=False)
+    if data.empty:
+        st.error("No data found for this symbol.")
+        st.stop()
 
-        st.success(f"📈 Data loaded for {symbol}")
-        close = data["Close"]
-        high  = data["High"]
-        low   = data["Low"]
+    st.success(f"📈 Data loaded for {symbol}")
 
-        rsi = RSIIndicator(close).rsi()
-        atr = AverageTrueRange(high, low, close).average_true_range()
-        data[ "RSI"] = rsi
-        data["ATR"] = atr
-        data.dropna(inplace=True)
+    # Convert to 1D Series
+    close = data["Close"]
+    high = data["High"]
+    low = data["Low"]
 
-        latest = data.iloc[-1]
-        rsi_val = latest["RSI"]
-        atr_val = latest["ATR"]
+    # Technical Indicators
+    rsi = RSIIndicator(close=close).rsi()
+    atr = AverageTrueRange(high=high, low=low, close=close).average_true_range()
 
-        # Strategy Logic
-        if rsi_val > 70:
-            signal  = "🔴 SELL"
-        elif rsi_val < 30:
-            signal  = "🟢 BUY"
-        else:
-            signal  = "⚖️ HOLD"
+    # Append indicators to DataFrame
+    data["RSI"] = rsi
+    data["ATR"] = atr
+    data.dropna(inplace=True)
 
-        st.subheader("💹 Latest Trade Details")
-        st.markdown(f"""
-        • **Signal:** {signal}  
-        • **RSI (14):** {rsi_val:.2f}  
-        • **ATR (14):** {atr_val:.2f}
-        """)
+    latest = data.iloc[-1]
+    rsi_val = latest["RSI"]
+    atr_val = latest["ATR"]
 
-        # Simple backtest on BUY signals
-        buys  = data[data["RSI"] < 30]
-        wins  = 0
-        for dt, row in buys.iterrows():
-            exit_dt = dt + pd.Timedelta(days=5)
-            if exit_dt in data.index and data.at[exit_dt, "Close"] > row["Close"]:
-                wins += 1
-        win_rate = round(wins / len(buys) * 100, 2) if len(buys) else 0
+    # Entry Logic
+    if rsi_val > 70:
+        signal = "🔴 SELL"
+    elif rsi_val < 30:
+        signal = "🟢 BUY"
+    else:
+        signal = "⚖️ HOLD"
 
-        st.subheader("📊 5D Backtest Win Rate")
-        st.metric("Win Rate", f"{win_rate}%")
+    st.subheader("💹 Latest Trade Details")
+    st.markdown(f"""
+    • **Signal:** {signal}  
+    • **RSI (14):** {rsi_val:.2f}  
+    • **ATR (14):** {atr_val:.2f}
+    """)
 
-        # Optional charts
-        if st.checkbox("📉 Show Charts"):
-            fig = go.Figure()
-            fig.add_trace(go.Scatter(x=data.index, y=close, mode="lines", name="Price"))
-            fig.add_trace(go.Scatter(x=data.index, y=rsi, mode="lines", name="RSI"))
-            fig.update_layout(height=400, title="Price & RSI")
-            st.plotly_chart(fig, use_container_width=True)
+    # 5D RSI < 30 BUY signal backtest
+    buys = data[data["RSI"] < 30]
+    wins = 0
+    for dt, row in buys.iterrows():
+        exit_dt = dt + pd.Timedelta(days=5)
+        if exit_dt in data.index and data.at[exit_dt, "Close"] > row["Close"]:
+            wins += 1
+    win_rate = round((wins / len(buys)) * 100, 2) if len(buys) else 0
 
-    except Exception as e:
-        st.error(f"🔥 Unexpected error: {e}")
+    st.subheader("📊 5D Backtest Win Rate")
+    st.metric("Win Rate", f"{win_rate}%")
+
+    # Optional chart display
+    if st.checkbox("📉 Show Charts"):
+        fig = go.Figure()
+        fig.add_trace(go.Scatter(x=data.index, y=data["Close"], mode="lines", name="Price"))
+        fig.add_trace(go.Scatter(x=data.index, y=data["RSI"], mode="lines", name="RSI"))
+        fig.update_layout(height=400, title="Price & RSI")
+        st.plotly_chart(fig, use_container_width=True)
+
+except Exception as e:
+    st.error(f"🔥 Error occurred: {e}")
